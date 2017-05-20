@@ -8,8 +8,8 @@
 # License: GPLv3 or later
 #==============================================================================
 
-      VERSION="2.00.02"
- VERSION_DATE="Mon May  1 12:14:19 MDT 2017"
+      VERSION="2.00.03"
+ VERSION_DATE="Sat May 20 04:00:01 MDT 2017"
 
         ME=${0##*/}
     MY_DIR=$(dirname "$(readlink -f $0)")
@@ -249,8 +249,7 @@ main() {
     # starting <program name>
     msg $"Starting %s" "$ME"
     start_log "$orig_args"
-
-    #[ "$FIFO_MODE" -a "$AUTO_MODE" ] && fatal "Cannot select both %s and %s" "--fifo" "--auto"
+    type -t find_man_page &>/dev/null && find_man_page
 
     shout_pretend
 
