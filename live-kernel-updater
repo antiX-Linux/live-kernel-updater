@@ -8,8 +8,8 @@
 # License: GPLv3 or later
 #==============================================================================
 
-      VERSION="2.00.07"
- VERSION_DATE="Sun Jul 30 17:28:09 MDT 2017"
+      VERSION="2.00.08"
+ VERSION_DATE="Tue Aug  8 11:34:20 MDT 2017"
 
         ME=${0##*/}
     MY_DIR=$(dirname "$(readlink -f $0)")
@@ -227,6 +227,9 @@ main() {
     local BE_VERBOSE VERY_VERBOSE VERBOSITY=0
     local orig_args="$*"
 
+    # Bashism: put the original arguments into an array to deal w/ spaces
+    declare -a ORIG_ARGS=("$@")
+
     # Let non-root users get usage.  Need to get --ignore-config early.
     read_early_params "$@"
 
@@ -290,7 +293,6 @@ main() {
     if its_alive_usb; then
         we_are_live=true
 
-        # FIXME: should use initrd.out to get the uuid, etc
         # This reads initrd.out file
         read_initrd_config
 
@@ -311,12 +313,12 @@ main() {
     local usb_dev live_mp
 
     #----- RUNNING LIVE -------------------------------------------------------
-    if [ "$DEVICE" = "live" ]; then
+    if update_live; then
         fatal_z "$we_are_live" $"This is not a live-usb system"
         live_mp=$LIVE_MP
         msg $"Will use running live system"
 
-        IS_ENCRYPTED=INITRD_ENCRYPTED
+        IS_ENCRYPTED=$INITRD_ENCRYPTED
 
         if encrypted ; then
             mount_if_needed "$bios_dev" $BIOS_DIR
@@ -501,14 +503,37 @@ main() {
     fatal_k0 "$boot_all" $"No kernels were found in the boot directory"
     fatal_k0 "$live_all" $"No kernels were found in the live boot directory"
 
-    if [ $action_cnt -eq 0 ]; then
-        if [ ${#MODS} -gt 0 ]; then
-            :
+    # Let's see if they should do a remaster first
+    local boot_all_cnt=$(count_lines "$boot_all")
+    local live_boot_cnt=0
+    # Only count /boot kernels if we are working on a live system
+    update_live && live_boot_cnt=$(count_kernels /boot)
+
+    # They should almost always remaster if they've installed a kernel
+    if [ $live_boot_cnt -gt $boot_all_cnt ]; then
+        shout $"You should do a remaster before doing a kernel update"
+        do_remaster "${ORIG_ARGS[@]}"
+    fi
+
+    if [ $action_cnt -eq 0 -a ${#MODS} -eq 0 ]; then
+
+        # Maybe they just need to do a remaster first
+        local boot_all_cnt=$(count_lines "$boot_all")
+        local live_boot_cnt=0
+        # Only count /boot kernels if we are working on a live system
+        [ "$DEVICE" = "live" ] && live_boot_cnt=$(count_lines "$($VM_VERSION_PROG -nsr /boot)")
+
+        # Aha, they just need to remaster first
+        if [ $live_boot_cnt -gt $boot_all_cnt ]; then
+            shout_subtitle $"You MUST do a remaster before doing a kernel update"
+            do_remaster "${ORIG_ARGS[@]}"
+            exit
+
         elif test -f "$template_initrd" ; then
-            msg
-            msg $"No new kernels were found"
-            msg $"Can only update the initrd file"
-            msg $"You must install a kernel and then remaster before doing a kernel update"
+            shout
+            shout $"No new kernels were found"
+            shout $"Can only update the initrd file"
+            shout $"You must install a kernel and then remaster before doing a kernel update"
         else
             error $"No new kernels were found and there's no template initrd file"
             fatal $"You must install a kernel and then remaster before doing a kernel update"
@@ -593,8 +618,11 @@ main() {
         # Update initrd using file <filename> [NOTE: no "%s" here!]
         blurb=$(printf "$blurb_fmt" $"Add initrd modules" "$(pq "$target_fname")")
 
+    elif [ "$action" = 'quit' ]; then
+        exit
+
     else
-        fatal "Internal error.  Unknown action: %s" "$action"
+        internal_error "update/rollback menu" "$action"
     fi
 
     msg
@@ -707,46 +735,57 @@ select_live_usb_device() {
 # and which vmlinuz file (vmlinuz or vmlinuz1) to perform it on.
 #------------------------------------------------------------------------------
 select_update_rollback_action() {
+    local var=$1
+
+    local menu=$(make_update_menu "$@")
+
+    echo "$menu"
+     local cnt=$(count_lines "$menu")
+     [ $cnt -lt 1 ] && fatal $"No update or rollback actions are available"
+
+    my_select $var $"Please select an action to perform" "$menu"
+}
+
+#------------------------------------------------------------------------------
+# Make the main menu for changing kernel or rolling back
+#------------------------------------------------------------------------------
+make_update_menu() {
     local var=$1  live_vm=$2  old_vm=$3  new_cnt=$4  initrd=$5  orig_ifs=$IFS
-    IFS=$K_IFS
+
+    local IFS=$K_IFS
 
     # FIXME: go through twice to get widths?
-    local fmt="%s$P_IFS$m_co%s$bold_co %s$m_co %s %s ($date_co%s$nc_co)\n"
+    local fmt="%s$bold_co %s$m_co %s %s ($date_co%s$nc_co)"
     local live_k  action  action_name
 
+    local version fname date
     if [ $new_cnt -gt 0 ]; then
         action=update; action_name=$"Update"
         while read version fname date; do
             [ ${#version} -eq 0 ] && continue
-            menu="$menu$(printf "$fmt" "$action@$fname" "$action_name" "$fname" $"from" "$(vq $version)" "$date")\n"
+            menu_printf "$action@$fname" "$fmt" "$action_name" "$fname" $"from" "$(vq $version)" "$date"
         done <<Live_VM
 $(echo "$live_vm")
 Live_VM
     fi
 
     action="rollback" ; action_name=$"Rollback"
-    fmt="%s$P_IFS$m_co%s$bold_co %s$m_co %s %s ($date_co%s$nc_co)\n"
-     while read version fname date; do
+    fmt="%s$bold_co %s$m_co %s %s ($date_co%s$nc_co)"
+    while read version fname date; do
         [ ${#version} -eq 0 ] && continue
         fname=${fname%$KOLD_EXT}
-        # Update|Rollback <file> to <new-version> (date)
-        # Translate the "to"
-        menu="$menu$(printf "$fmt" "$action@$fname" "$action_name" "$fname" $"to" "$(vq $version)" "$date")\n"
+        menu_printf "$action@$fname" "$fmt" "$action_name" "$fname" $"to" "$(vq $version)" "$date"
     done <<Old_VM
 $(echo "$old_vm")
 Old_VM
 
     [ ${#initrd} -gt 0 ] && test -f "$initrd" \
-        && menu="$menu$(printf "%s$P_IFS%s %s" "initrd@$initrd" $"Update initrd using file" "$(pq "$initrd")")\n"
+        && menu_printf "initrd@$initrd" $"Update initrd using file %s" "$(pq "$initrd")"
 
+    menu_printf 'quit' $"Quit"
     IFS=$orig_ifs
-    menu=$(echo -e "$menu")
-
-    local cnt=$(count_lines "$menu")
-    fatal_0 "$cnt" $"No update or rollback actions are available"
-
-    my_select $var $"Please select an action to perform" "$menu"
 }
+
 
 #------------------------------------------------------------------------------
 # This is the third menu.  It lets the user select the new kernel that will
@@ -1034,6 +1073,33 @@ my_done() {
         Shout "%s %s %s." "$ME" "$action" $"done"
     fi
     my_exit 0
+}
+
+
+#------------------------------------------------------------------------------
+# Convenience routine
+#------------------------------------------------------------------------------
+update_live() { [ "$DEVICE" = 'live' ] ; return $? ; }
+
+#------------------------------------------------------------------------------
+# Count the number of kernels in a directory
+#------------------------------------------------------------------------------
+count_kernels() {
+    local dir=$1
+    count_lines "$($VM_VERSION_PROG -nsr /boot)"
+}
+
+
+#------------------------------------------------------------------------------
+#
+#------------------------------------------------------------------------------
+do_remaster() {
+    YES_no $"Would you like to do a remaster now?" || return
+    live-remaster --cli
+    shout $"Ready to restart %s" "$ME"
+    press_enter
+    clean_up
+    exec $0 "$@"
 }
 
 #------------------------------------------------------------------------------
