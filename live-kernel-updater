@@ -8,8 +8,8 @@
 # License: GPLv3 or later
 #==============================================================================
 
-      VERSION="2.00.09"
- VERSION_DATE="Sun Aug 27 05:01:58 MDT 2017"
+      VERSION="2.00.10"
+ VERSION_DATE="Mon Oct  2 14:38:31 MDT 2017"
 
         ME=${0##*/}
     MY_DIR=$(dirname "$(readlink -f $0)")
@@ -276,7 +276,10 @@ main() {
     shout_title $"Starting %s" "$ME"
     set_window_title "$ME"
 
-    start_log "$orig_args"
+    start_log "$THE_LOG_FILE" "$orig_args"
+    ERR_FILE=$THE_ERR_FILE
+    test -f $ERR_FILE && rm -f $ERR_FILE
+
     type -t find_man_page &>/dev/null && find_man_page
 
     shout_pretend
@@ -1113,32 +1116,6 @@ my_exit() {
 
     #Msg "=> cleaning up"
     exit $ret
-}
-
-#------------------------------------------------------------------------------
-# Start logging
-#------------------------------------------------------------------------------
-start_log() {
-    local args=$1 cmds=${2# }
-
-    LOG_FILE=$THE_LOG_FILE
-    ERR_FILE=$THE_ERR_FILE
-
-    rm -f $ERR_FILE
-
-    test -e $LOG_FILE && echo >> $LOG_FILE
-
-    cat <<Start_Log >> $LOG_FILE
----------------------------------------------------------------------
-$0
-        started: $(date)
-        version: $VERSION ($VERSION_DATE)
-    comand line: $args
-      found lib: $FOUND_LIB
-     TEXTDOMAIN: $TEXTDOMAIN
-  TEXTDOMAINDIR: $TEXTDOMAINDIR
-
-Start_Log
 }
 
 #------------------------------------------------------------------------------
