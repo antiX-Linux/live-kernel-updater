@@ -8,8 +8,8 @@
 # License: GPLv3 or later
 #==============================================================================
 
-      VERSION="2.00.10"
- VERSION_DATE="Mon Oct  2 14:38:31 MDT 2017"
+      VERSION="2.00.11"
+ VERSION_DATE="Mon Jan 15 08:26:50 MST 2018"
 
         ME=${0##*/}
     MY_DIR=$(dirname "$(readlink -f $0)")
@@ -743,9 +743,9 @@ select_update_rollback_action() {
 
     local menu=$(make_update_menu "$@")
 
-    echo "$menu"
-     local cnt=$(count_lines "$menu")
-     [ $cnt -lt 1 ] && fatal $"No update or rollback actions are available"
+    #echo "$menu"
+    local cnt=$(count_lines "$menu")
+    [ $cnt -lt 1 ] && fatal $"No update or rollback actions are available"
 
     my_select $var $"Please select an action to perform" "$menu"
 }
